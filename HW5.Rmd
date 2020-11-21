@@ -1,0 +1,176 @@
+---
+title: "HW 5: Count Regression on Wine Dataset"
+author: "Team 1: Michael O'Donnell"
+date: "November 19, 2020"
+output: html_document
+---
+
+# 1. Data Exploration
+
+First, the wine data training set was explored for size and structure. The training set has 12795 observations and 16 variables. 15 of the variables are predictors, and the response variable is called TARGET. The response variable is count data, ranging from 0 to 8 with a median of 3 and a large number of 0's.
+
+The structure of the test set is identicle to the training set, but with only 3335 observations.
+
+To explore the training data further, a few techniques were used:
+- first, the summary function exposed the means, medians, and quartiles of all variables
+- then, the str function showed the data type of each variable
+- next, the distribution of TARGET was explored with a histogram. The data was bimodal, with one peak at 0 and another around 3. Typical of count data, there are many 0's in the distribution.
+- last, the correlation between predictors (or appropriate data type) and TARGET were visualized.
+
+# 2. Data Preparation
+
+The training and testing data were prepared for count regression. Specifically, they were prepared for a Generalized Linear Model with a poisson distribution.
+
+So, the incomplete records were addressed first. In the training set, the following variables had incomplete records:
+- ResidualSugar
+- Chlorides
+- FreeSulfurDioxide
+- TotalSulfurDioxide
+- pH
+- Sulphates
+- Alcohol
+- STARS
+
+Since the STARS variable had a strong correlation with TARGET, all rows with a missing STARS variable were removed from the training set and testing est.
+
+For the rest of the variables, each missing variable was replaced by the mean of that variable in the training set. But, for the testing set, no rows were removed for these missing variables.
+
+# 3. Build Models
+
+First, a GLM with poisson distribution and log link function was built.
+
+The distribution was poisson because the response variable was count data. The link function was log because the high number of 0's in the response variable.
+
+The model was first built with all variables, it had a residual deviance of 5836.9 on 9421 degrees of freedom.
+
+# 4. Select Models
+
+To select a model, many iterations and changes were made. Overall, all variables were removed that had a p-value > 0.05 and the distribution was changed from poisson to quasipoisson. The final model is named model2 in the appendix.
+
+This final model was used to predict TARGET values for the test dataset. The results are shown in a histogram in the appendix.
+
+# Appendix
+
+Import Libraries and Data
+```{r messages=FALSE, warning=FALSE}
+# load required packages
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(MASS)
+library(caret)
+library(RCurl)
+library(pROC)
+library(RCurl)
+library(haven)
+library(xtable)
+```
+
+Load data
+```{r import}
+# Loading the data
+git_dir <- 'https://raw.githubusercontent.com/odonnell31/DATA621-HW5/main/data'
+#class_data = read.csv(paste(git_dir, "/classification-output-data.csv", sep=""))
+train_df = read.csv(paste(git_dir, "/wine-training-data.csv", sep=""))
+test_df = read.csv(paste(git_dir, "/wine-evaluation-data.csv", sep = ""))
+head(train_df, 2)
+```
+
+## Data Exploration & Preparation
+
+See a summary of each column in the train_df set
+```{r train_data_summary}
+# view a summary of all columns
+summary(train_df)
+```
+
+Look at the data type of each variable
+```{r}
+# data type of predictors
+str(train_df)
+```
+
+Look at the histogram of TARGET
+```{r}
+h <- hist(train_df$TARGET, ylim = c(0,4000), breaks = 8,
+          main="Histogram: Cases of Sample Wine Purchased",
+          xlab = "Cases Purchased",
+          ylab = "Frequency")
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, -0.5))
+```
+
+Look at the correlation among each of the variables
+```{r}
+cor_train = cor(train_df[c("TARGET", "LabelAppeal", "STARS",
+                           "AcidIndex", "Alcohol")],  use = "na.or.complete")
+corrplot(cor_train)
+```
+
+Check for varaibles with NA's
+```{r}
+has_NA = names(which(sapply(train_df, anyNA)))
+has_NA
+```
+
+Remove rows where STARS are missing
+```{r}
+train_df <- train_df[complete.cases(train_df$STARS), ]
+```
+
+Remove incomplete rows for testing dataset
+```{r}
+test_df <- test_df[complete.cases(test_df$STARS), ]
+```
+
+Replace NA's with means for rest of variables
+```{r}
+train_df$ResidualSugar[is.na(train_df$ResidualSugar)] <- mean(train_df$ResidualSugar, na.rm = T)
+train_df$Chlorides[is.na(train_df$Chlorides)] <- mean(train_df$Chlorides, na.rm = T)
+train_df$FreeSulfurDioxide[is.na(train_df$FreeSulfurDioxide)] <- mean(train_df$FreeSulfurDioxide, na.rm = T)
+train_df$TotalSulfurDioxide[is.na(train_df$TotalSulfurDioxide)] <- mean(train_df$TotalSulfurDioxide, na.rm = T)
+train_df$pH[is.na(train_df$pH)] <- mean(train_df$pH, na.rm = T)
+train_df$Alcohol[is.na(train_df$Alcohol)] <- mean(train_df$Alcohol, na.rm = T)
+train_df$Sulphates[is.na(train_df$Sulphates)] <- mean(train_df$Sulphates, na.rm = T)
+
+# re-check for NA's
+has_NA2 = names(which(sapply(train_df, anyNA)))
+has_NA2
+```
+
+build poisson GLM model
+```{r}
+model1 <- glm(formula = TARGET ~ FixedAcidity + LabelAppeal +
+                VolatileAcidity + CitricAcid + ResidualSugar +
+                Chlorides + FreeSulfurDioxide + TotalSulfurDioxide +
+                Density + pH + Sulphates + Alcohol + STARS +
+                AcidIndex,
+              family = poisson(link = "log"),
+              data = train_df)
+
+summary(model1)
+```
+
+refine the poisson GLM model
+```{r}
+model2 <- glm(formula = TARGET ~ LabelAppeal +
+                VolatileAcidity + Alcohol + STARS +
+                AcidIndex,
+              family = quasipoisson(link = "log"),
+              data = train_df)
+
+summary(model2)
+```
+
+
+```{r}
+predict <- predict(model1, newdata=test_df, type = 'response')
+test_df$TARGET <- predict
+
+h <- hist(test_df$TARGET, ylim = c(0,850), breaks = 8,
+          main="Histogram: Predicted Cases of Sample Wine Purchased in Test Set",
+          xlab = "Predicted Cases Purchased",
+          ylab = "Frequency")
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, -0.5))
+```
+
+
